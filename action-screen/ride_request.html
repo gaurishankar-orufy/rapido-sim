@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>New ride request</title>
+<!--
+  Action Screen: Rapido-style ride request. One self-contained file (no network), for the screen's htmlFileName.
+
+  data the trigger sends (rapido-sim adds ride_id / driver_id):
+  {
+    "ride_id": "r_ab12cd34",
+    "rider": { "name": "Riya Sharma", "rating": 4.8 },
+    "pickup": { "name": "Hawa Mahal", "address": "Badi Choupad, Pink City", "distance_km": 1.2, "eta_min": 4 },
+    "drop": { "name": "Jaipur Junction", "address": "Station Rd, Gopalbari" },
+    "trip": { "distance_km": 6.4, "duration_min": 22 },
+    "fare": "₹142", "payment_mode": "Cash", "vehicle": "Bike"
+  }
+  Buttons: onAccept() / onReject() (the app injects them). The countdown is display-only: the app runs the real timer.
+-->
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#111;color:#fff;
+    padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);
+    -webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+  .screen{min-height:100%;display:flex;flex-direction:column;max-width:520px;margin:0 auto;padding:22px 18px 18px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tag{background:#F9C80E;color:#111;font-weight:800;font-size:13px;padding:6px 10px;border-radius:999px;letter-spacing:.02em}
+  .ring{position:relative;width:64px;height:64px;flex:none}
+  .ring svg{transform:rotate(-90deg)}
+  .ring circle{fill:none;stroke-width:6}
+  .ring .bg{stroke:#2a2a2a}
+  .ring .fg{stroke:#F9C80E;stroke-linecap:round;transition:stroke-dashoffset 1s linear}
+  .ring span{position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-variant-numeric:tabular-nums}
+  .no-countdown .ring{display:none}
+  h1{font-size:30px;line-height:1.1;margin-top:18px;font-weight:800}
+  .fare{display:flex;align-items:baseline;gap:10px;margin-top:6px}
+  .fare b{font-size:44px;color:#F9C80E;font-weight:800}
+  .fare span{color:#bbb;font-size:15px}
+  .card{background:#1c1c1c;border-radius:16px;padding:16px;margin-top:18px}
+  .stop{display:grid;grid-template-columns:18px 1fr;gap:12px}
+  .stop + .stop{margin-top:14px}
+  .dot{width:12px;height:12px;border-radius:50%;margin-top:5px}
+  .pick{background:#2ecc71}.drop{background:#e74c3c}
+  .stop small{color:#999;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  .stop b{display:block;font-size:17px;margin-top:2px}
+  .stop p{color:#bbb;font-size:14px;margin-top:2px}
+  .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .meta div{background:#1c1c1c;border-radius:12px;padding:10px;text-align:center}
+  .meta small{display:block;color:#999;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .meta b{font-size:16px}
+  .rider{display:flex;align-items:center;gap:12px;margin-top:14px;color:#ddd}
+  .avatar{width:40px;height:40px;border-radius:50%;background:#2a2a2a;display:grid;place-items:center;font-weight:800;color:#F9C80E}
+  .status{margin-top:14px;font-weight:700;min-height:22px;text-align:center}
+  .status:empty{display:none}
+  .actions{margin-top:auto;padding-top:18px;display:grid;grid-template-columns:1fr 2fr;gap:12px}
+  button{font:inherit;font-weight:800;font-size:18px;height:60px;border:0;border-radius:14px;cursor:pointer;touch-action:manipulation}
+  .skip{background:transparent;color:#fff;box-shadow:inset 0 0 0 2px #444}
+  .accept{background:#F9C80E;color:#111}
+  .responded button{opacity:.45;pointer-events:none}
+  .badge{position:fixed;top:8px;left:8px;background:#F9C80E;color:#111;font:700 11px system-ui;padding:3px 7px;border-radius:6px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body data-countdown="{{countdown}}">
+<main class="screen">
+  <div class="top">
+    <span class="tag">🛵 {{vehicle}} ride</span>
+    <div class="ring" aria-label="Time left">
+      <svg width="64" height="64"><circle class="bg" cx="32" cy="32" r="28"/><circle class="fg" cx="32" cy="32" r="28"/></svg>
+      <span data-left>{{countdown}}</span>
+    </div>
+  </div>
+
+  <h1>New ride request</h1>
+  <div class="fare"><b>{{fare}}</b><span>{{payment_mode}} · {{trip.distance_km}} km · {{trip.duration_min}} min</span></div>
+
+  <div class="card">
+    <div class="stop"><i class="dot pick"></i><div>
+      <small>Pickup · {{pickup.distance_km}} km away</small><b>{{pickup.name}}</b><p>{{pickup.address}}</p></div></div>
+    <div class="stop"><i class="dot drop"></i><div>
+      <small>Drop</small><b>{{drop.name}}</b><p>{{drop.address}}</p></div></div>
+  </div>
+
+  <div class="meta">
+    <div><small>Reach in</small><b>{{pickup.eta_min}} min</b></div>
+    <div><small>Trip</small><b>{{trip.distance_km}} km</b></div>
+    <div><small>Earn</small><b>{{fare}}</b></div>
+  </div>
+
+  <div class="rider"><div class="avatar" data-initial>{{rider.name}}</div><div>{{rider.name}} · ★ {{rider.rating}}</div></div>
+
+  <p class="status" data-status aria-live="polite"></p>
+
+  <div class="actions">
+    <button class="skip" data-done="Skipped" onclick="onReject()">Skip</button>
+    <button class="accept" data-done="Accepting…" onclick="onAccept()">Accept ride</button>
+  </div>
+</main>
+<script>(function () {
+  var d = document, root = d.documentElement, body = d.body;
+  var mh = window.webkit && window.webkit.messageHandlers;
+  var inApp = !!(window.WebToNativeInterface || (mh && mh.webToNativeInterface));
+
+  // Browser preview only (never inside the app): sample values and logging stand-ins for the four functions.
+  if (!inApp) {
+    var SAMPLE = { countdown: 30, vehicle: 'Bike', fare: '₹142', payment_mode: 'Cash',
+      trip: { distance_km: 6.4, duration_min: 22 }, rider: { name: 'Riya Sharma', rating: 4.8 },
+      pickup: { name: 'Hawa Mahal', address: 'Badi Choupad, Pink City', distance_km: 1.2, eta_min: 4 },
+      drop: { name: 'Jaipur Junction', address: 'Station Rd, Gopalbari' } };
+    var RX = /\{\{\s*([A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+|\[\d+\])*)\s*\}\}/g;
+    var get = function (path) {
+      return path.replace(/\[(\d+)\]/g, '.$1').split('.').reduce(function (o, k) { return o == null ? '' : o[k]; }, SAMPLE);
+    };
+    var fill = function (s) { return s.replace(RX, function (_, p) { var v = get(p); return v == null ? '' : String(v); }); };
+    var w = d.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) w.currentNode.nodeValue = fill(w.currentNode.nodeValue);
+    body.setAttribute('data-countdown', fill(body.getAttribute('data-countdown')));
+    ['onAccept', 'onReject', 'openApp', 'dismiss'].forEach(function (name) {
+      window[name] = function () { console.log('[preview] ' + name + '()'); };
+    });
+    var badge = d.createElement('div'); badge.className = 'badge'; badge.textContent = 'Browser preview'; body.appendChild(badge);
+  }
+
+  // Avatar: first letter of the rider's name.
+  var initial = d.querySelector('[data-initial]');
+  if (initial) initial.textContent = (initial.textContent.trim()[0] || '?').toUpperCase();
+
+  // Countdown: display only. The app runs the real timer and dismisses the screen (Reject chain) at expiry.
+  var total = parseInt(body.getAttribute('data-countdown'), 10), left = total, timer = null;
+  var leftEl = d.querySelector('[data-left]'), ring = d.querySelector('.ring .fg'), C = 2 * Math.PI * 28;
+  var statusEl = d.querySelector('[data-status]');
+  ring.style.strokeDasharray = C;
+  function paint() { leftEl.textContent = left; ring.style.strokeDashoffset = String(C * (1 - (total ? left / total : 0))); }
+  if (!(total > 0)) root.classList.add('no-countdown');
+  else {
+    paint();
+    timer = setInterval(function () {
+      left = Math.max(0, left - 1); paint();
+      if (left === 0) { clearInterval(timer); if (!root.classList.contains('responded')) statusEl.textContent = 'Request expired'; }
+    }, 1000);
+  }
+
+  // Lock the buttons after the first tap (the app also ignores repeats), and say what happened.
+  d.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('button');
+    if (!btn || root.classList.contains('responded')) return;
+    root.classList.add('responded');
+    clearInterval(timer);
+    statusEl.textContent = btn.getAttribute('data-done') || '';
+  }, true);
+})();</script>
+</body>
+</html>

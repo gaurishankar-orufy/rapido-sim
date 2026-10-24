@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rapido Sim</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --text:#1b1b1b; --muted:#6b6b6b; --line:#e3e3df; --brand:#f9c80e; --ok:#1f8f4e; --bad:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141414; --card:#1e1e1e; --text:#eee; --muted:#9a9a9a; --line:#2e2e2e; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; display:grid; gap:16px; }
+  h1 { margin:0; font-size:22px; } h2 { margin:0 0 10px; font-size:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+  label { display:grid; gap:4px; font-size:13px; color:var(--muted); }
+  input, select, textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; width:100%; }
+  textarea { font: 12px/1.4 ui-monospace, monospace; min-height: 220px; }
+  button { font:inherit; font-weight:600; border:0; border-radius:8px; padding:10px 16px; cursor:pointer; background:var(--brand); color:#111; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .status { font-size:20px; font-weight:700; }
+  .searching { color:#c78c00; } .accepted { color:var(--ok); } .no_drivers, .failed, .cancelled { color:var(--bad); }
+  .muted { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  pre { font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow:auto; margin:0; }
+  .err { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content:space-between">
+    <h1>🛵 Rapido Sim</h1>
+    <span class="muted">API: <span id="apiBase"></span></span>
+  </div>
+
+  <section class="card">
+    <h2>Book a ride</h2>
+    <div class="grid">
+      <label>Screen ID <input id="screen" value="incoming_call"></label>
+      <label>Expires in (s) <input id="expires" type="number" value="120" min="1"></label>
+      <label>Platforms
+        <select id="platforms"><option value="android,ios">Android + iOS</option><option value="android">Android</option><option value="ios">iOS</option></select>
+      </label>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <label>Drivers: external user IDs, one per line or comma (empty = everyone)
+        <textarea id="drivers" style="min-height:90px" placeholder="3434743834743798"></textarea></label>
+      <label>Dispatch
+        <select id="mode">
+          <option value="broadcast">All at once: first Accept wins</option>
+          <option value="sequential">One by one: next driver on Skip or timeout</option>
+        </select>
+        <span class="muted">One by one: each driver gets "Expires in" seconds.</span></label>
+    </div>
+    <label style="margin-top:10px">Data (JSON, sent as-is; the server adds <code>ride_id</code>) <textarea id="data"></textarea></label>
+    <div class="row" style="margin-top:12px">
+      <button id="book">Book ride</button>
+      <button class="ghost" id="rideSample">Ride sample data</button>
+      <span id="bookErr" class="err"></span>
+    </div>
+  </section>
+
+  <section class="card" id="activeCard" hidden>
+    <h2>Current ride <span id="activeId" class="muted"></span></h2>
+    <div class="status" id="activeStatus"></div>
+    <div class="muted" id="activeMeta"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="cancel">Cancel ride</button>
+      <button class="ghost" id="withdrawBtn">Withdraw</button>
+    </div>
+    <pre id="activeEvents" style="margin-top:12px"></pre>
+  </section>
+
+  <section class="card">
+    <h2>Rides</h2>
+    <table><thead><tr><th>Ride</th><th>Screen</th><th>Mode</th><th>Status</th><th>Offered to</th><th>Accepted by</th><th>Rejected</th><th>Request ID</th></tr></thead><tbody id="rides"></tbody></table>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between"><h2>Inbound chain calls</h2><button class="ghost" id="refreshLogs">Refresh</button></div>
+    <pre id="logs" class="muted">No calls yet.</pre>
+  </section>
+</main>
+<script>
+  // Same origin by default; ?api=https://your-app.up.railway.app when this page is hosted elsewhere.
+  const API = (new URLSearchParams(location.search).get('api') || location.origin).replace(/\/+$/, '');
+  document.getElementById('apiBase').textContent = API;
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  let active = null;
+
+  $('data').value = JSON.stringify({
+    order_id: 'A1029', count: 42, price: 499.5, zero: 0, is_paid: true, is_gift: false, empty_str: '', nothing: null,
+    customer: { name: 'Riya Sharma', name_quote: 'Riya "R" O\'Neil', phone: '+91 98290 12345',
+      address: { line1: 'Flat 302, Shanti Residency', city: 'Jaipur', geo: { lat: 26.9124, lng: 75.7873 } } },
+    items: [{ sku: 'PT-01', name: 'Paneer tikka wrap', qty: 2, price: 180, addons: [{ name: 'Extra cheese', price: 30 }, { name: 'Mint dip', price: 0 }] },
+      { sku: 'MC-02', name: 'Masala chai', qty: 1, price: 96, addons: [] }],
+    tags: ['veg', 'priority', 'late-night'], matrix: [[1, 2, 3], [4, 5, 6]],
+    a: { b: { c: { d: { e: { f: { g: { h: 'deep-8' } } } } } } },
+    meta: { 'x-request-id': 'req-77', '2fa': 'enabled', 'Key With Space': 'spaced' },
+    unicode: { hindi: 'नमस्ते जयपुर', emoji: '🚚📦✅', rtl: 'مرحبا بك', mixed: 'café – naïve' },
+    attack: { html: '<img src=x onerror="window.__w2nXss=\'html\'">', script: '</script><script>window.__w2nXss=\'script\'</script>',
+      js_breaker: '";window.__w2nXss=\'js\';//', braces: '{{order_id}}', url: 'https://example.com/p?a=1&b=two words#frag' },
+  }, null, 2);
+
+  async function api(path, options) {
+    const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...options });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 409) throw new Error(body.reason || 'HTTP ' + res.status);
+    return body;
+  }
+
+  $('book').onclick = async () => {
+    $('bookErr').textContent = '';
+    let data;
+    try { data = JSON.parse($('data').value || '{}'); } catch { return ($('bookErr').textContent = 'Data is not valid JSON'); }
+    const drivers = $('drivers').value.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
+    $('book').disabled = true;
+    try {
+      active = await api('/api/rides', { method: 'POST', body: JSON.stringify({
+        screen_id: $('screen').value.trim(), expires_in: Number($('expires').value), platforms: $('platforms').value.split(','), drivers, mode: $('mode').value, data,
+      }) });
+      render();
+    } catch (e) { $('bookErr').textContent = e.message; }
+    $('book').disabled = false;
+  };
+  $('cancel').onclick = () => active && api(`/api/rides/${active.rideId}/cancel`, { method: 'POST' }).then(poll);
+  $('withdrawBtn').onclick = () => active && api(`/api/rides/${active.rideId}/withdraw`, { method: 'POST' }).then(poll);
+  $('refreshLogs').onclick = loadLogs;
+  // Matches action-screen/ride_request.html (use it as the htmlFileName of the screen you book).
+  $('rideSample').onclick = () => {
+    $('data').value = JSON.stringify({
+      vehicle: 'Bike', fare: '₹142', payment_mode: 'Cash',
+      rider: { name: 'Riya Sharma', rating: 4.8 },
+      pickup: { name: 'Hawa Mahal', address: 'Badi Choupad, Pink City', distance_km: 1.2, eta_min: 4 },
+      drop: { name: 'Jaipur Junction', address: 'Station Rd, Gopalbari' },
+      trip: { distance_km: 6.4, duration_min: 22 },
+    }, null, 2);
+  };
+
+  const label = { searching: 'Finding a driver…', accepted: 'Driver found 🎉', no_drivers: 'No drivers found', cancelled: 'Ride cancelled', failed: 'Send failed' };
+  const latest = (r) => r.attempts[r.attempts.length - 1] || {};
+  const offeredTo = (r) => (latest(r).to?.length ? latest(r).to.join(', ') : 'everyone');
+
+  function render() {
+    if (!active) return;
+    $('activeCard').hidden = false;
+    $('activeId').textContent = active.rideId;
+    $('activeStatus').className = 'status ' + active.status;
+    let text = label[active.status] || active.status;
+    if (active.status === 'searching') text += ` (offered to ${offeredTo(active)})`;
+    if (active.status === 'searching' && active.expiresAt) {
+      const left = Math.max(0, Math.round((new Date(active.expiresAt) - Date.now()) / 1000));
+      text += ` ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    }
+    if (active.status === 'accepted') text += ` · ${active.acceptedBy}`;
+    $('activeStatus').textContent = text;
+    $('activeMeta').textContent = `${active.mode === 'sequential' ? 'one by one' : 'all at once'} · request ${latest(active).requestId || '—'} · ` +
+      `offers ${active.attempts.length}${active.mode === 'sequential' ? '/' + active.drivers.length : ''} · rejected by ${active.rejectedBy.length}`;
+    $('activeEvents').textContent = active.events.map((e) => `${e.at.slice(11, 19)}  ${e.type}${e.detail ? '  ' + JSON.stringify(e.detail) : ''}`).join('\n');
+  }
+
+  async function poll() {
+    try {
+      const list = await api('/api/rides');
+      $('rides').innerHTML = list.map((r) => `<tr><td>${esc(r.rideId)}</td><td>${esc(r.screenId)}</td><td>${esc(r.mode)}</td>` +
+        `<td class="${esc(r.status)}">${esc(r.status)}</td><td>${esc(offeredTo(r))}</td><td>${esc(r.acceptedBy)}</td>` +
+        `<td>${r.rejectedBy.length}</td><td class="muted">${esc(latest(r).requestId)}</td></tr>`).join('');
+      if (active) { active = list.find((r) => r.rideId === active.rideId) || active; render(); }
+    } catch { /* server asleep or restarting: try again next tick */ }
+  }
+
+  async function loadLogs() {
+    try {
+      const logs = await api('/api/logs');
+      $('logs').textContent = logs.length ? JSON.stringify(logs, null, 2) : 'No calls yet.';
+    } catch (e) { $('logs').textContent = e.message; }
+  }
+
+  setInterval(poll, 2000);
+  setInterval(() => active?.status === 'searching' && render(), 1000);
+  poll();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "rapido-sim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rapido-style tester for the W2N Action Screen API",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node smoke.js"
+  }
+}
