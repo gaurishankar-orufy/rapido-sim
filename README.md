@@ -49,4 +49,4 @@ State is in memory: a restart or redeploy clears it.
 ## Sample action screen
 `action-screen/ride_request.html` is a Rapido-style ride request screen: pickup/drop, fare, countdown ring, and
 Skip / Accept buttons (`onReject()` / `onAccept()`). Upload it as the screen's HTML in the dashboard and use the
-page's **Ride sample data** button for matching `data`. Open it in a browser to preview it with sample values.
+page's default `data`, which matches it. Open it in a browser to preview it with sample values.

@@ -37,7 +37,7 @@
   <section class="card">
     <h2>Book a ride</h2>
     <div class="grid">
-      <label>Screen ID <input id="screen" value="incoming_call"></label>
+      <label>Screen ID <input id="screen" value="ride_request"></label>
       <label>Expires in (s) <input id="expires" type="number" value="120" min="1"></label>
       <label>Platforms
         <select id="platforms"><option value="android,ios">Android + iOS</option><option value="android">Android</option><option value="ios">iOS</option></select>
@@ -56,7 +56,6 @@
     <label style="margin-top:10px">Data (JSON, sent as-is; the server adds <code>ride_id</code>) <textarea id="data"></textarea></label>
     <div class="row" style="margin-top:12px">
       <button id="book">Book ride</button>
-      <button class="ghost" id="rideSample">Ride sample data</button>
       <span id="bookErr" class="err"></span>
     </div>
   </section>
@@ -90,18 +89,13 @@
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   let active = null;
 
+  // Default data: matches action-screen/ride_request.html. Edit freely; the server adds ride_id.
   $('data').value = JSON.stringify({
-    order_id: 'A1029', count: 42, price: 499.5, zero: 0, is_paid: true, is_gift: false, empty_str: '', nothing: null,
-    customer: { name: 'Riya Sharma', name_quote: 'Riya "R" O\'Neil', phone: '+91 98290 12345',
-      address: { line1: 'Flat 302, Shanti Residency', city: 'Jaipur', geo: { lat: 26.9124, lng: 75.7873 } } },
-    items: [{ sku: 'PT-01', name: 'Paneer tikka wrap', qty: 2, price: 180, addons: [{ name: 'Extra cheese', price: 30 }, { name: 'Mint dip', price: 0 }] },
-      { sku: 'MC-02', name: 'Masala chai', qty: 1, price: 96, addons: [] }],
-    tags: ['veg', 'priority', 'late-night'], matrix: [[1, 2, 3], [4, 5, 6]],
-    a: { b: { c: { d: { e: { f: { g: { h: 'deep-8' } } } } } } },
-    meta: { 'x-request-id': 'req-77', '2fa': 'enabled', 'Key With Space': 'spaced' },
-    unicode: { hindi: 'नमस्ते जयपुर', emoji: '🚚📦✅', rtl: 'مرحبا بك', mixed: 'café – naïve' },
-    attack: { html: '<img src=x onerror="window.__w2nXss=\'html\'">', script: '</script><script>window.__w2nXss=\'script\'</script>',
-      js_breaker: '";window.__w2nXss=\'js\';//', braces: '{{order_id}}', url: 'https://example.com/p?a=1&b=two words#frag' },
+    vehicle: 'Bike', fare: '₹142', payment_mode: 'Cash',
+    rider: { name: 'Riya Sharma', rating: 4.8 },
+    pickup: { name: 'Hawa Mahal', address: 'Badi Choupad, Pink City', distance_km: 1.2, eta_min: 4 },
+    drop: { name: 'Jaipur Junction', address: 'Station Rd, Gopalbari' },
+    trip: { distance_km: 6.4, duration_min: 22 },
   }, null, 2);
 
   async function api(path, options) {
@@ -128,16 +122,6 @@
   $('cancel').onclick = () => active && api(`/api/rides/${active.rideId}/cancel`, { method: 'POST' }).then(poll);
   $('withdrawBtn').onclick = () => active && api(`/api/rides/${active.rideId}/withdraw`, { method: 'POST' }).then(poll);
   $('refreshLogs').onclick = loadLogs;
-  // Matches action-screen/ride_request.html (use it as the htmlFileName of the screen you book).
-  $('rideSample').onclick = () => {
-    $('data').value = JSON.stringify({
-      vehicle: 'Bike', fare: '₹142', payment_mode: 'Cash',
-      rider: { name: 'Riya Sharma', rating: 4.8 },
-      pickup: { name: 'Hawa Mahal', address: 'Badi Choupad, Pink City', distance_km: 1.2, eta_min: 4 },
-      drop: { name: 'Jaipur Junction', address: 'Station Rd, Gopalbari' },
-      trip: { distance_km: 6.4, duration_min: 22 },
-    }, null, 2);
-  };
 
   const label = { searching: 'Finding a driver…', accepted: 'Driver found 🎉', no_drivers: 'No drivers found', cancelled: 'Ride cancelled', failed: 'Send failed' };
   const latest = (r) => r.attempts[r.attempts.length - 1] || {};
